@@ -27,7 +27,7 @@ class DataIngestion:
         logging.info("Entered the data ingestion method or componenet")
         try:
             # Reading data 
-            df = pd.read_csv('notebook\data\stud.csv')
+            df = pd.read_csv('notebook','data','stud.csv')
             logging.info("Read the dataset as dataframe")
 
             # Creating folder named artifact
