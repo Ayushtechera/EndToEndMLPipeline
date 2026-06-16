@@ -1,0 +1,121 @@
+name: workflow
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  integration:
+    name: Continuous Integration
+    # runs on ubuntu means : Github actions gives its own temporary Ubuntu machine and this integration job will execute on that machine 
+    #Task On that machine : Code is downloaded, Tests will run ,Docker image is build and after doing all this task machine will get deleted 
+    # Common tests : Unit test : Checks small functions
+    #                integration test : Means if differents parts are working fine with each other  
+    runs-on: ubuntu-latest
+    steps:
+        # Temporary download github repository code on ubuntu machine  
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+        # Linting tools(like flake8) : These tools help in checking the code style & small code mistakes  
+      - name: Lint code
+        run: echo "Linting repository"
+
+      - name: Run unit tests
+        run: echo "Running unit tests"
+
+
+  build-and-push-ecr-image:
+    name: Continuous Delivery
+    # It needs integraiton job to execute first then it will execute 
+    needs: integration
+    runs-on: ubuntu-latest
+    steps:
+
+        # Download code from github on machine 
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+        # Install the utilities on the machine 
+      - name: Install Utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq unzip
+
+         # Here we give credentials to connect github to AWS account 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+        # Temporary machine will login into the ECR repo   
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        
+        # Here docker image is build , name/tag assign to image, then image is pushed into ECR Repo
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+          IMAGE_TAG: latest
+        run: |
+          # Build a docker container and
+          # push it to ECR so that it can
+          # be deployed to ECS.
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          
+          
+  Continuous-Deployment:
+    # once images i pushed into ECR then this will CD will run 
+    needs: build-and-push-ecr-image
+    # Here we are not using github action machine, here we have our own server EC2 which will run the all the steps
+    runs-on: self-hosted
+    steps:
+        # Download code on EC2 instance
+      - name: Checkout
+        uses: actions/checkout@v3
+
+        # Permision is given to EC2 to access AWS acoount 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+        
+        # EC2 machine will login into ECR 
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+      
+        # Latest ECR doacker image will be downloaded from the ECR
+      - name: Pull latest images
+        run: |
+         docker pull ${{secrets.AWS_ECR_LOGIN_URI}}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
+         
+      # - name: Stop and remove  container if running
+      #   run: |
+      #    docker ps -q --filter "name=mltest" | grep -q . && docker stop mltest && docker rm -fv mltest
+       
+        # Container will start from the image and application is served to users
+      - name: Run Docker Image to serve users
+        run: |
+         docker run -d -p 8080:8080 --ipc="host" --name=mltest -e 'AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}' -e 'AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}' -e 'AWS_REGION=${{ secrets.AWS_REGION }}'  ${{secrets.AWS_ECR_LOGIN_URI}}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
+
+        # Old unused containers , images, cache etc will be deleted 
+      - name: Clean previous images and containers
+        run: |
+         docker system prune -f
