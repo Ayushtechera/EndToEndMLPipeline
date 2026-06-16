@@ -1,7 +1,7 @@
 from flask import Flask,render_template,request
 import numpy as np
 import pandas as pd 
-
+# Adding checking comment for deployment 
 from sklearn.preprocessing import StandardScaler
 from src.pipeline.predict_pipeline import CustomData,PreditcPipeline
 
