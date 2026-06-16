@@ -111,7 +111,8 @@ jobs:
         # Latest ECR doacker image will be downloaded from the ECR
       - name: Pull latest images
         run: |
-         docker pull ${{secrets.AWS_ECR_LOGIN_URI}}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
+           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ECR_LOGIN_URI }}
+           docker pull ${{ secrets.AWS_ECR_LOGIN_URI }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
          
       - name: Stop and remove  container if running
         run: |
@@ -125,4 +126,4 @@ jobs:
         # Old unused containers , images, cache etc will be deleted 
       - name: Clean previous images and containers
         run: |
-         docker system prune -f
+         docker system prune -f 
